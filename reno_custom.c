@@ -13,13 +13,20 @@ u32 tcp_reno_ssthresh(struct sock *sk)
 {
     /* Halve the congestion window, min 2 */
     const struct tcp_sock *tp = tcp_sk(sk);
-    return max(tp->snd_cwnd >> 1U, 2U);
+    u32 new_ssthresh = max(tp->snd_cwnd >> 1U, 2U);
+    printk(KERN_INFO, "[LOSS] cwnd=%u -> ssthresh=%u\n", tp->snd_cwnd, new_ssthresh);
+    return new_ssthresh;
 }
 
 void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 {
     struct tcp_sock *tp = tcp_sk(sk);
-    printk(KERN_INFO "tp->snd_cwnd is %d\n", tp->snd_cwnd);
+    // printk(KERN_INFO "tp->snd_cwnd is %d\n", tp->snd_cwnd);
+    printk(KERN_INFO
+           "[%u ms] cwnd=%u ssthresh=%u acked=%u state=%s limited=%d\n",
+           jiffies_to_msecs(jiffies),
+           tp->snd_cwnd, tp->snd_ssthresh, acked,
+           ss ? "SS" : "CA", limited);
 
     if (!tcp_is_cwnd_limited(sk))
         return;
