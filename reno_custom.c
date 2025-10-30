@@ -21,14 +21,20 @@ u32 tcp_reno_ssthresh(struct sock *sk)
 void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 {
     struct tcp_sock *tp = tcp_sk(sk);
+    static u32 prev_cwnd = 0;  // 이전 cwnd를 저장 (전역 static 변수)
     bool ss = tcp_in_slow_start(tp);
     bool limited = tcp_is_cwnd_limited(sk);
     // printk(KERN_INFO "tp->snd_cwnd is %d\n", tp->snd_cwnd);
-    printk(KERN_INFO
-           "[%u ms] cwnd=%u ssthresh=%u acked=%u state=%s limited=%d\n",
-           jiffies_to_msecs(jiffies),
-           tp->snd_cwnd, tp->snd_ssthresh, acked,
-           ss ? "SS" : "CA", limited);
+// cwnd 변화가 있는 경우에만 로그 출력
+    if (tp->snd_cwnd != prev_cwnd) {
+        printk(KERN_INFO "[%u ms] cwnd=%u ssthresh=%u state=%s limited=%d\n",
+               jiffies_to_msecs(jiffies),
+               tp->snd_cwnd,
+               tp->snd_ssthresh,
+               ss ? "SS" : "CA",
+               limited);
+        prev_cwnd = tp->snd_cwnd;
+    }
 
     if (!limited)
         return;
