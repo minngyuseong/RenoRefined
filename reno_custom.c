@@ -21,6 +21,8 @@ u32 tcp_reno_ssthresh(struct sock *sk)
 void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 {
     struct tcp_sock *tp = tcp_sk(sk);
+    bool ss = tcp_in_slow_start(tp);
+    bool limited = tcp_is_cwnd_limited(sk);
     // printk(KERN_INFO "tp->snd_cwnd is %d\n", tp->snd_cwnd);
     printk(KERN_INFO
            "[%u ms] cwnd=%u ssthresh=%u acked=%u state=%s limited=%d\n",
@@ -28,10 +30,11 @@ void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
            tp->snd_cwnd, tp->snd_ssthresh, acked,
            ss ? "SS" : "CA", limited);
 
-    if (!tcp_is_cwnd_limited(sk))
+    if (!limited)
         return;
 
-    if (tp->snd_cwnd <= tp->snd_ssthresh) {
+    // if (tp->snd_cwnd <= tp->snd_ssthresh) {
+    if(ss) {
         /* In "slow start", cwnd is increased by the number of ACKed packets */
         acked = tcp_slow_start(tp, acked);
         if (!acked)
