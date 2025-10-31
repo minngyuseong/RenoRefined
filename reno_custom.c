@@ -80,4 +80,4 @@ module_exit(tcp_reno_module_exit);
 MODULE_AUTHOR("nethw");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("TCP Reno Congestion Control");
-~                                                  
+                                                
