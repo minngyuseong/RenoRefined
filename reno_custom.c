@@ -6,41 +6,25 @@ void tcp_reno_init(struct sock *sk)
 {
     /* Initialize congestion control specific variables here */
     tcp_sk(sk)->snd_ssthresh = TCP_INFINITE_SSTHRESH; // Typically, this is a high value
-    tcp_sk(sk)->snd_cwnd = 10; // Start with initial cwnd of 10 (RFC 6928)
+    tcp_sk(sk)->snd_cwnd = 1; // Start with a congestion window of 1
 }
 
 u32 tcp_reno_ssthresh(struct sock *sk)
 {
     /* Halve the congestion window, min 2 */
     const struct tcp_sock *tp = tcp_sk(sk);
-    u32 new_ssthresh = max(tp->snd_cwnd >> 1U, 2U);
-    printk(KERN_INFO "[LOSS] cwnd=%u -> ssthresh=%u\n", tp->snd_cwnd, new_ssthresh);
-    return new_ssthresh;
+    return max(tp->snd_cwnd >> 1U, 2U);
 }
 
 void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 {
     struct tcp_sock *tp = tcp_sk(sk);
-    u32 *prev_cwnd = (u32 *)&inet_csk(sk)->icsk_ca_priv[0];
-    bool ss = tcp_in_slow_start(tp);
-    bool limited = tcp_is_cwnd_limited(sk);
-    
-    // cwnd 변화가 있는 경우에만 로그 출력
-    if (tp->snd_cwnd != *prev_cwnd) {
-        printk(KERN_INFO "[%u ms] cwnd=%u ssthresh=%u state=%s limited=%d\n",
-               jiffies_to_msecs(jiffies),
-               tp->snd_cwnd,
-               tp->snd_ssthresh,
-               ss ? "SS" : "CA",
-               limited);
-        *prev_cwnd = tp->snd_cwnd;
-    }
+    printk(KERN_INFO "tp->snd_cwnd is %d\n", tp->snd_cwnd);
 
-    if (!limited)
+    if (!tcp_is_cwnd_limited(sk))
         return;
 
-    // if (tp->snd_cwnd <= tp->snd_ssthresh) {
-    if(ss) {
+    if (tp->snd_cwnd <= tp->snd_ssthresh) {
         /* In "slow start", cwnd is increased by the number of ACKed packets */
         acked = tcp_slow_start(tp, acked);
         if (!acked)
@@ -96,4 +80,4 @@ module_exit(tcp_reno_module_exit);
 MODULE_AUTHOR("nethw");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("TCP Reno Congestion Control");
-                                                  
+~                                                  
