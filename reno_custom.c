@@ -19,7 +19,13 @@ u32 tcp_reno_ssthresh(struct sock *sk)
 void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 {
     struct tcp_sock *tp = tcp_sk(sk);
-    printk(KERN_INFO "tp->snd_cwnd is %d\n", tp->snd_cwnd);
+    u32 *prev_cwnd = (u32 *)&inet_csk(sk)->icsk_ca_priv[0];
+    
+    // cwnd가 변경된 경우에만 로그 출력
+    if (tp->snd_cwnd != *prev_cwnd) {
+        printk(KERN_INFO "tp->snd_cwnd changed: %u -> %u\n", *prev_cwnd, tp->snd_cwnd);
+        *prev_cwnd = tp->snd_cwnd;
+    }
 
     if (!tcp_is_cwnd_limited(sk))
         return;
