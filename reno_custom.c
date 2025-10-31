@@ -2,11 +2,26 @@
 #include <linux/kernel.h>
 #include <net/tcp.h>
 
+/* Private data structure for each TCP connection */
+struct reno_custom {
+    u32 prev_cwnd;  // 이전 cwnd 값을 저장
+};
+
+static inline struct reno_custom *reno_ca(const struct sock *sk)
+{
+    return (struct reno_custom *)inet_csk_ca(sk);
+}
+
 void tcp_reno_init(struct sock *sk)
 {
+    struct reno_custom *ca = reno_ca(sk);
+    
     /* Initialize congestion control specific variables here */
     tcp_sk(sk)->snd_ssthresh = TCP_INFINITE_SSTHRESH; // Typically, this is a high value
-    tcp_sk(sk)->snd_cwnd = 1; // Start with a congestion window of 1
+    tcp_sk(sk)->snd_cwnd = 10; // Start with initial cwnd of 10 (RFC 6928)
+    
+    /* Initialize private data */
+    ca->prev_cwnd = 0;
 }
 
 u32 tcp_reno_ssthresh(struct sock *sk)
@@ -14,26 +29,26 @@ u32 tcp_reno_ssthresh(struct sock *sk)
     /* Halve the congestion window, min 2 */
     const struct tcp_sock *tp = tcp_sk(sk);
     u32 new_ssthresh = max(tp->snd_cwnd >> 1U, 2U);
-    printk(KERN_INFO, "[LOSS] cwnd=%u -> ssthresh=%u\n", tp->snd_cwnd, new_ssthresh);
+    printk(KERN_INFO "[LOSS] cwnd=%u -> ssthresh=%u\n", tp->snd_cwnd, new_ssthresh);
     return new_ssthresh;
 }
 
 void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 {
     struct tcp_sock *tp = tcp_sk(sk);
-    static u32 prev_cwnd = 0;  // 이전 cwnd를 저장 (전역 static 변수)
+    struct reno_custom *ca = reno_ca(sk);
     bool ss = tcp_in_slow_start(tp);
     bool limited = tcp_is_cwnd_limited(sk);
-    // printk(KERN_INFO "tp->snd_cwnd is %d\n", tp->snd_cwnd);
-// cwnd 변화가 있는 경우에만 로그 출력
-    if (tp->snd_cwnd != prev_cwnd) {
+    
+    // cwnd 변화가 있는 경우에만 로그 출력
+    if (tp->snd_cwnd != ca->prev_cwnd) {
         printk(KERN_INFO "[%u ms] cwnd=%u ssthresh=%u state=%s limited=%d\n",
                jiffies_to_msecs(jiffies),
                tp->snd_cwnd,
                tp->snd_ssthresh,
                ss ? "SS" : "CA",
                limited);
-        prev_cwnd = tp->snd_cwnd;
+        ca->prev_cwnd = tp->snd_cwnd;
     }
 
     if (!limited)
@@ -71,6 +86,8 @@ static struct tcp_congestion_ops tcp_reno_custom = {
 
     .owner          = THIS_MODULE,
     .name           = "reno_custom",
+    .flags          = 0,
+    .priv_size      = sizeof(struct reno_custom),
 };
 
 /* Initialization function of this module */
