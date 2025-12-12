@@ -73,4 +73,4 @@ if __name__ == "__main__":
     import sys
     
     cc_algo = sys.argv[1] if len(sys.argv) > 1 else 'reno'
-    runExperiment(cc_algo, duration=30, num_clients=20)
+    runExperiment(cc_algo, duration=10, num_clients=20)
