@@ -52,11 +52,12 @@ def runExperiment(cc_algo='reno_bwe', duration=30):
 
     # 🔹 클라이언트 5개를 각기 다른 포트로 연결
     info("*** Start 5 concurrent iperf3 clients (h2~h6)\n")
-    for idx, c in enumerate(clients, start=2):
-        port = 5200 + idx       # h2→5202, h3→5203, …, h6→5206
-        logFile = f"/tmp/iperf3_h{idx}_{cc_algo}.json"
+    for i, c in enumerate(clients):
+        port = 5201 + i         # h2→5201, h3→5202, …, h6→5205
+        host_num = i + 2         # h2, h3, h4, h5, h6
+        logFile = f"/tmp/iperf3_h{host_num}_{cc_algo}.json"
         cmd = f"iperf3 -J -c {server_ip} -p {port} -t {duration} > {logFile} &"
-        info(f"h{idx}: {cmd}\n")
+        info(f"h{host_num}: {cmd}\n")
         c.cmd(cmd)
         time.sleep(0.2)  # 살짝 간격 두기 (너무 동시 연결하면 로그 꼬일 위험 감소)
 
