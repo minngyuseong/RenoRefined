@@ -3,7 +3,7 @@ import glob
 import os
 import math
 
-LINK_CAPACITY_GBPS = 10.0   # 링크 용량 (Gbps)
+LINK_CAPACITY_GBPS = 1.0   # 링크 용량 (Gbps) - 1000 Mbps
 
 def extract_bps(json_data):
     """

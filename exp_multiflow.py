@@ -15,10 +15,10 @@ class MultiFlowTopo(Topo):
 
         link_opts = dict(
             cls=TCLink,
-           # bw=1000,        # 1 Gbit/s
+            bw=1000,        # 1000 Mbit/s = 1 Gbit/s
             delay='50ms',    # 높은 지연
             jitter='10ms',   # 지연 변동
-            loss=1         # 링크 오류로 인한 높은 손실
+            loss=1.0         # 1% 패킷 손실
         )
 
         self.addLink(server, s1, **link_opts)
