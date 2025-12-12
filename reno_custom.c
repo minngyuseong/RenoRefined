@@ -2,88 +2,159 @@
 #include <linux/kernel.h>
 #include <net/tcp.h>
 
-void tcp_reno_init(struct sock *sk)
+/*
+ * Reno + Westwood 스타일 하이브리드
+ * - pkts_acked: 대역폭(BWE) + 최소 RTT 추정
+ * - ssthresh: 손실 시 cwnd/2 대신 BDP 기반으로 설정
+ * - cong_avoid: Reno 증가 (공정성 유지)
+ *
+ * reno_custom (원래 reno_bwe)
+ */
+
+struct reno_bwe {
+    u32 min_rtt_us;
+    u32 bwe_pps;
+    u32 bwe_filt_pps;
+    u32 spare;
+};
+
+static void reno_custom_init(struct sock *sk)
 {
-    /* Initialize congestion control specific variables here */
-    tcp_sk(sk)->snd_ssthresh = TCP_INFINITE_SSTHRESH; // Typically, this is a high value
-    tcp_sk(sk)->snd_cwnd = 1; // Start with a congestion window of 1
+    struct reno_bwe *ca = inet_csk_ca(sk);
+
+    ca->min_rtt_us   = 0x7fffffff;
+    ca->bwe_pps      = 0;
+    ca->bwe_filt_pps = 0;
+    ca->spare        = 0;
 }
 
-u32 tcp_reno_ssthresh(struct sock *sk)
+static void reno_custom_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 {
-    /* Halve the congestion window, min 2 */
+    struct reno_bwe *ca = inet_csk_ca(sk);
+    s32 rtt_us = sample->rtt_us;
+    u32 pkts   = sample->pkts_acked;
+    u64 inst_pps;
+
+    if (rtt_us <= 0 || pkts == 0)
+        return;
+
+    /* RTT 업데이트 */
+    if (ca->min_rtt_us == 0x7fffffff || (u32)rtt_us < ca->min_rtt_us)
+        ca->min_rtt_us = (u32)rtt_us;
+
+    /* BWE = pkts / RTT */
+    inst_pps = (u64)pkts * USEC_PER_SEC;
+    do_div(inst_pps, (u32)rtt_us);
+
+    ca->bwe_pps = (u32)inst_pps;
+
+    /* EWMA 필터 */
+    if (ca->bwe_filt_pps == 0)
+        ca->bwe_filt_pps = ca->bwe_pps;
+    else
+        ca->bwe_filt_pps = (7 * ca->bwe_filt_pps + ca->bwe_pps) >> 3;
+}
+
+static u32 reno_custom_ssthresh(struct sock *sk)
+{
     const struct tcp_sock *tp = tcp_sk(sk);
-    return max(tp->snd_cwnd >> 1U, 2U);
+    struct reno_bwe *ca = inet_csk_ca(sk);
+
+    u32 reno_half = max(tp->snd_cwnd >> 1U, 2U);
+
+    if (ca->min_rtt_us == 0x7fffffff || ca->bwe_filt_pps == 0)
+        return reno_half;
+
+    /* BDP = BWE * min_rtt */
+    {
+        u64 bdp_pkts = (u64)ca->bwe_filt_pps * (u64)ca->min_rtt_us;
+        u32 target_cwnd;
+
+        do_div(bdp_pkts, USEC_PER_SEC);
+
+        if (bdp_pkts < 2)
+            target_cwnd = 2;
+        else if (bdp_pkts > (u64)tp->snd_cwnd * 4U)
+            target_cwnd = tp->snd_cwnd * 4U;
+        else
+            target_cwnd = (u32)bdp_pkts;
+
+        return max(target_cwnd, 2U);
+    }
 }
 
-void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
+static void reno_custom_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 {
     struct tcp_sock *tp = tcp_sk(sk);
-    u32 *prev_cwnd = (u32 *)&inet_csk(sk)->icsk_ca_priv[0];
-    
-    // cwnd가 변경된 경우에만 로그 출력
-    if (tp->snd_cwnd != *prev_cwnd) {
-        printk(KERN_INFO "tp->snd_cwnd changed: %u -> %u\n", *prev_cwnd, tp->snd_cwnd);
-        *prev_cwnd = tp->snd_cwnd;
-    }
+    struct reno_bwe *ca = inet_csk_ca(sk);
 
     if (!tcp_is_cwnd_limited(sk))
         return;
 
-    if (tp->snd_cwnd <= tp->snd_ssthresh) {
-        /* In "slow start", cwnd is increased by the number of ACKed packets */
+    if (tcp_in_slow_start(tp)) {
         acked = tcp_slow_start(tp, acked);
         if (!acked)
             return;
-    } else {
-        /* In "congestion avoidance", cwnd is increased by 1 full packet
-         * per round-trip time (RTT), which is approximated here by the number of
-         * ACKed packets divided by the current congestion window. */
-        tcp_cong_avoid_ai(tp, tp->snd_cwnd, acked);
     }
 
-    /* Ensure that cwnd does not exceed the maximum allowed value */
+    tcp_cong_avoid_ai(tp, tp->snd_cwnd, acked);
+
+    /* cwnd가 BDP의 2배 이상이면 제한 */
+    if (ca->min_rtt_us != 0x7fffffff && ca->bwe_filt_pps > 0) {
+        u64 bdp_pkts = (u64)ca->bwe_filt_pps * (u64)ca->min_rtt_us;
+        u32 cap;
+
+        do_div(bdp_pkts, USEC_PER_SEC);
+        cap = (u32)bdp_pkts * 2U;
+
+        if (cap > 0 && tp->snd_cwnd > cap)
+            tp->snd_cwnd = cap;
+    }
+
     tp->snd_cwnd = min(tp->snd_cwnd, tp->snd_cwnd_clamp);
 }
 
-u32 tcp_reno_undo_cwnd(struct sock *sk)
+static u32 reno_custom_undo_cwnd(struct sock *sk)
 {
-    /* Undo the cwnd changes during congestion avoidance if needed */
     return tcp_sk(sk)->snd_cwnd;
 }
 
-/* This structure contains the hooks to our congestion control algorithm */
-static struct tcp_congestion_ops tcp_reno_custom = {
-    .init           = tcp_reno_init,
-    .ssthresh       = tcp_reno_ssthresh,
-    .cong_avoid     = tcp_reno_cong_avoid,
-    .undo_cwnd      = tcp_reno_undo_cwnd,
 
-    .owner          = THIS_MODULE,
-    .name           = "reno_custom",
+static struct tcp_congestion_ops tcp_reno_custom = {
+    .init       = reno_custom_init,
+    .ssthresh   = reno_custom_ssthresh,
+    .cong_avoid = reno_custom_cong_avoid,
+    .undo_cwnd  = reno_custom_undo_cwnd,
+    .pkts_acked = reno_custom_pkts_acked,
+
+    .owner      = THIS_MODULE,
+    .name       = "reno_custom",   /* ⭐ 모듈 이름 변경! */
 };
 
-/* Initialization function of this module */
-static int __init tcp_reno_module_init(void)
+static int __init reno_custom_module_init(void)
 {
-    /* Register the new congestion control */
-    BUILD_BUG_ON(sizeof(struct tcp_congestion_ops) != sizeof(struct tcp_congestion_ops));
-    if (tcp_register_congestion_control(&tcp_reno_custom))
-        return -ENOBUFS;
-    return 0;
+    int ret;
+
+    BUILD_BUG_ON(sizeof(struct reno_bwe) > ICSK_CA_PRIV_SIZE);
+
+    ret = tcp_register_congestion_control(&tcp_reno_custom);
+    if (ret)
+        pr_err("reno_custom: registration failed (%d)\n", ret);
+    else
+        pr_info("reno_custom: registered\n");
+    return ret;
 }
 
-/* Cleanup function of this module */
-static void __exit tcp_reno_module_exit(void)
+static void __exit reno_custom_module_exit(void)
 {
-    /* Unregister the congestion control */
     tcp_unregister_congestion_control(&tcp_reno_custom);
+    pr_info("reno_custom: unregistered\n");
 }
 
-module_init(tcp_reno_module_init);
-module_exit(tcp_reno_module_exit);
+module_init(reno_custom_module_init);
+module_exit(reno_custom_module_exit);
 
-MODULE_AUTHOR("nethw");
+MODULE_AUTHOR("mingyu");
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("TCP Reno Congestion Control");
-                                                
+MODULE_DESCRIPTION("Modified TCP Reno (reno_custom) with Westwood-style BWE");
+

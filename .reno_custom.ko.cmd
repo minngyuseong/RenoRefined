@@ -1,0 +1,1 @@
+cmd_/home/mingyu/RenoRefined/reno_custom.ko := ld -r  -EL  -maarch64elf -z noexecstack   --build-id  -T ./scripts/module-common.lds -T ./arch/arm64/kernel/module.lds -o /home/mingyu/RenoRefined/reno_custom.ko /home/mingyu/RenoRefined/reno_custom.o /home/mingyu/RenoRefined/reno_custom.mod.o;  true
